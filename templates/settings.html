@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Settings — NEPSE Portfolio{% endblock %}
+
+{% block content %}
+<div class="page" x-data="settingsPage()" x-init="init()">
+  <div class="page-header">
+    <h1>Settings</h1>
+    <p>Configure email notifications and app preferences</p>
+  </div>
+
+  <div style="max-width:560px">
+    <!-- Email settings -->
+    <div class="card mb-6">
+      <div class="card-title">📧 Daily Email Summary</div>
+      <div class="form-group">
+        <label>Recipient Email</label>
+        <input type="email" x-model="form.email_recipient" placeholder="you@example.com">
+      </div>
+      <div class="form-group">
+        <label>Send Time (Nepal Time)</label>
+        <input type="time" x-model="form.email_time">
+        <div style="font-size:11px;color:var(--ink-3);margin-top:4px">Default: 16:00 (after NEPSE market close at 3 PM)</div>
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+          <div style="position:relative;width:40px;height:22px">
+            <input type="checkbox" x-model="form.email_enabled" style="opacity:0;width:0;height:0;position:absolute">
+            <div @click="form.email_enabled=!form.email_enabled"
+                 :style="form.email_enabled ? 'background:var(--blue)' : 'background:var(--ink-4)'"
+                 style="position:absolute;inset:0;border-radius:22px;cursor:pointer;transition:background .2s">
+              <div :style="form.email_enabled ? 'left:20px' : 'left:2px'"
+                   style="position:absolute;top:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:left .2s"></div>
+            </div>
+          </div>
+          <span style="font-size:13px;font-weight:500">Enable daily email</span>
+        </label>
+      </div>
+      <div style="background:var(--blue-dim);border-radius:8px;padding:14px;font-size:13px;color:#1e40af;margin-bottom:16px">
+        <strong>📋 Setup required:</strong> Set <code>SENDGRID_API_KEY</code> and <code>SENDGRID_FROM_EMAIL</code>
+        as environment variables in your Render.com dashboard.
+      </div>
+      <button class="btn btn-primary" @click="save()" :disabled="saving">
+        <span x-show="saving" class="spinner"></span>
+        <span x-text="saving ? 'Saving…' : 'Save Settings'"></span>
+      </button>
+    </div>
+
+    <!-- App info -->
+    <div class="card mb-6">
+      <div class="card-title">ℹ️ App Info</div>
+      <div style="font-size:13px;color:var(--ink-2);line-height:1.8">
+        <div class="flex justify-between" style="padding:6px 0;border-bottom:1px solid var(--surface-3)">
+          <span style="color:var(--ink-3)">Price Source</span>
+          <span>Merolagani.com</span>
+        </div>
+        <div class="flex justify-between" style="padding:6px 0;border-bottom:1px solid var(--surface-3)">
+          <span style="color:var(--ink-3)">Auto Price Refresh</span>
+          <span>Daily at 3:30 PM NPT</span>
+        </div>
+        <div class="flex justify-between" style="padding:6px 0;border-bottom:1px solid var(--surface-3)">
+          <span style="color:var(--ink-3)">Email Service</span>
+          <span>SendGrid</span>
+        </div>
+        <div class="flex justify-between" style="padding:6px 0">
+          <span style="color:var(--ink-3)">Data Storage</span>
+          <span>JSON (Render Persistent Disk)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manual actions -->
+    <div class="card">
+      <div class="card-title">⚡ Manual Actions</div>
+      <div class="flex gap-3">
+        <button class="btn btn-secondary" @click="sendTestEmail()" :disabled="testSending">
+          <span x-show="testSending" class="spinner"></span>
+          <span x-text="testSending ? 'Sending…' : '📧 Send Test Email'"></span>
+        </button>
+        <button class="btn btn-secondary" @click="refreshNow()" :disabled="refreshing">
+          <span x-show="refreshing" class="spinner"></span>
+          <span x-text="refreshing ? 'Refreshing…' : '↻ Refresh Prices Now'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function settingsPage() {
+  return {
+    form: { email_recipient: '', email_enabled: false, email_time: '16:00' },
+    saving: false,
+    testSending: false,
+    refreshing: false,
+
+    init() {
+      this.form = {
+        email_recipient: '{{ settings.email_recipient }}',
+        email_enabled:   {{ 'true' if settings.email_enabled else 'false' }},
+        email_time:      '{{ settings.email_time or "16:00" }}'
+      };
+    },
+
+    async save() {
+      this.saving = true;
+      try {
+        const r = await fetch('/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.form)
+        });
+        const d = await r.json();
+        if (d.ok) showToast('Settings saved!', 'success');
+        else showToast('Save failed', 'error');
+      } catch(e) { showToast('Network error', 'error'); }
+      finally { this.saving = false; }
+    },
+
+    async refreshNow() {
+      this.refreshing = true;
+      try {
+        const r = await fetch('/api/refresh-prices', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) showToast('Prices refreshed!', 'success');
+        else showToast(d.error || 'No holdings to refresh', 'error');
+      } catch(e) { showToast('Network error', 'error'); }
+      finally { this.refreshing = false; }
+    },
+
+    async sendTestEmail() {
+      if (!this.form.email_recipient) { showToast('Please enter recipient email first', 'error'); return; }
+      await this.save();
+      this.testSending = true;
+      try {
+        const r = await fetch('/api/send-test-email', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) showToast('Test email sent!', 'success');
+        else showToast(d.error || 'Email failed — check SendGrid env vars', 'error');
+      } catch(e) { showToast('Network error', 'error'); }
+      finally { this.testSending = false; }
+    }
+  }
+}
+</script>
+{% endblock %}

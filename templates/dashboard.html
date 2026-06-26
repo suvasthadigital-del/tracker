@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — NEPSE Portfolio{% endblock %}
+
+{% block content %}
+<div class="page" x-data="dashboard()">
+
+  <div class="page-header flex items-center justify-between">
+    <div>
+      <h1>Portfolio Dashboard</h1>
+      <p>
+        {% if updated_at %}
+          Prices last updated: <strong>{{ updated_at[:16].replace('T',' ') }}</strong> &nbsp;·&nbsp;
+        {% endif %}
+        {{ portfolio.symbols_count }} stocks &nbsp;·&nbsp; {{ portfolio.holdings_count }} entries
+      </p>
+    </div>
+    <button class="btn btn-primary" @click="refreshPrices" :disabled="refreshing">
+      <span x-show="refreshing" class="spinner"></span>
+      <span x-text="refreshing ? 'Refreshing…' : '↻ Refresh Prices'"></span>
+    </button>
+  </div>
+
+  <!-- ── Summary stats ──────────────────────────────────────────────────── -->
+  <div class="stats-grid">
+    <div class="stat-card blue">
+      <div class="stat-label">Total Invested</div>
+      <div class="stat-value">Rs. {{ "{:,.0f}".format(portfolio.total_invested) }}</div>
+      <div class="stat-sub">{{ portfolio.symbols_count }} stocks</div>
+    </div>
+    <div class="stat-card {{ 'green' if portfolio.overall_pnl >= 0 else 'red' }}">
+      <div class="stat-label">Current Value</div>
+      <div class="stat-value">Rs. {{ "{:,.0f}".format(portfolio.total_current_value) }}</div>
+      <div class="stat-sub {{ 'text-green' if portfolio.overall_pnl >= 0 else 'text-red' }}">
+        {{ "+" if portfolio.overall_pnl >= 0 else "" }}Rs. {{ "{:,.0f}".format(portfolio.overall_pnl) }}
+        ({{ "+" if portfolio.overall_pnl_percent >= 0 else "" }}{{ portfolio.overall_pnl_percent }}%)
+      </div>
+    </div>
+    <div class="stat-card {{ 'green' if portfolio.total_day_change >= 0 else 'red' }}">
+      <div class="stat-label">Today's Change</div>
+      <div class="stat-value {{ 'text-green' if portfolio.total_day_change >= 0 else 'text-red' }}">
+        {{ "+" if portfolio.total_day_change >= 0 else "" }}Rs. {{ "{:,.0f}".format(portfolio.total_day_change) }}
+      </div>
+      <div class="stat-sub">vs. previous close</div>
+    </div>
+    <div class="stat-card gold">
+      <div class="stat-label">Portfolio XIRR</div>
+      <div class="stat-value text-gold">
+        {% if portfolio.portfolio_xirr is not none %}
+          {{ "+" if portfolio.portfolio_xirr >= 0 else "" }}{{ portfolio.portfolio_xirr }}%
+        {% else %}
+          N/A
+        {% endif %}
+      </div>
+      <div class="stat-sub">annualized return</div>
+    </div>
+  </div>
+
+  <!-- ── Charts row ─────────────────────────────────────────────────────── -->
+  <div class="grid-2 mb-6">
+    <div class="card">
+      <div class="card-title">Allocation by Stock</div>
+      <div style="position:relative;height:240px">
+        <canvas id="pieChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">P&L by Stock (Rs.)</div>
+      <div style="position:relative;height:240px">
+        <canvas id="barChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Portfolio history line chart ───────────────────────────────────── -->
+  {% if history %}
+  <div class="card mb-6">
+    <div class="card-title">Portfolio Value — Daily History</div>
+    <div style="position:relative;height:200px">
+      <canvas id="lineChart"></canvas>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── Gainers / Losers ────────────────────────────────────────────────── -->
+  <div class="grid-2 mb-6">
+    <div class="card">
+      <div class="card-title">🏆 Top Gainers</div>
+      {% for g in portfolio.top_gainers %}
+      <div class="flex items-center justify-between" style="padding:8px 0;border-bottom:1px solid var(--surface-3)">
+        <div>
+          <span class="symbol-pill">{{ g.symbol }}</span>
+          <span style="font-size:12px;color:var(--ink-3);margin-left:8px">{{ g.company_name[:28] }}</span>
+        </div>
+        <div class="text-right">
+          <div class="text-green" style="font-weight:700">+{{ g.pnl_percent }}%</div>
+          <div style="font-size:11px;color:var(--ink-3)">Rs. {{ "{:,.0f}".format(g.pnl_amount) }}</div>
+        </div>
+      </div>
+      {% else %}
+      <div style="color:var(--ink-3);font-size:13px">No data yet</div>
+      {% endfor %}
+    </div>
+    <div class="card">
+      <div class="card-title">📉 Top Losers</div>
+      {% for l in portfolio.top_losers %}
+      <div class="flex items-center justify-between" style="padding:8px 0;border-bottom:1px solid var(--surface-3)">
+        <div>
+          <span class="symbol-pill">{{ l.symbol }}</span>
+          <span style="font-size:12px;color:var(--ink-3);margin-left:8px">{{ l.company_name[:28] }}</span>
+        </div>
+        <div class="text-right">
+          <div class="text-red" style="font-weight:700">{{ l.pnl_percent }}%</div>
+          <div style="font-size:11px;color:var(--ink-3)">Rs. {{ "{:,.0f}".format(l.pnl_amount) }}</div>
+        </div>
+      </div>
+      {% else %}
+      <div style="color:var(--ink-3);font-size:13px">No data yet</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- ── Holdings summary table ─────────────────────────────────────────── -->
+  <div class="card">
+    <div class="flex items-center justify-between mb-4">
+      <div class="card-title" style="margin-bottom:0">Holdings Overview</div>
+      <a href="/holdings" class="btn btn-secondary btn-sm">Manage Holdings →</a>
+    </div>
+    {% if portfolio.aggregated %}
+    <div class="table-wrap" style="border:none;box-shadow:none;border-radius:0">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th class="text-right">Qty</th>
+            <th class="text-right">Avg Buy</th>
+            <th class="text-right">LTP</th>
+            <th class="text-right">Invested</th>
+            <th class="text-right">Value</th>
+            <th class="text-right">P&L</th>
+            <th class="text-right">P&L %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in portfolio.aggregated %}
+          <tr>
+            <td><span class="symbol-pill">{{ s.symbol }}</span></td>
+            <td class="text-right mono">{{ "{:,.0f}".format(s.qty) }}</td>
+            <td class="text-right mono">{{ "{:,.2f}".format(s.avg_buy_price) }}</td>
+            <td class="text-right mono">
+              {% if s.ltp %}{{ "{:,.2f}".format(s.ltp) }}{% else %}<span style="color:var(--ink-4)">—</span>{% endif %}
+            </td>
+            <td class="text-right mono">{{ "{:,.0f}".format(s.invested) }}</td>
+            <td class="text-right mono">{{ "{:,.0f}".format(s.current_value) }}</td>
+            <td class="text-right mono {{ 'text-green' if s.pnl_amount >= 0 else 'text-red' }}">
+              {{ "+" if s.pnl_amount >= 0 else "" }}{{ "{:,.0f}".format(s.pnl_amount) }}
+            </td>
+            <td class="text-right">
+              <span class="badge {{ 'badge-bonus' if s.pnl_percent >= 0 else 'badge-right' }}"
+                    style="{{ 'background:var(--green-dim);color:var(--green)' if s.pnl_percent >= 0 else 'background:var(--red-dim);color:var(--red)' }}">
+                {{ "+" if s.pnl_percent >= 0 else "" }}{{ s.pnl_percent }}%
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="icon">📊</div>
+      <h3>No holdings yet</h3>
+      <p>Add your first stock in the Holdings page.</p>
+      <a href="/holdings" class="btn btn-primary" style="margin-top:14px">Add Holdings</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+const PIE_LABELS = {{ portfolio.chart_pie_labels | tojson }};
+const PIE_VALUES = {{ portfolio.chart_pie_values | tojson }};
+const BAR_LABELS = {{ portfolio.chart_bar_labels | tojson }};
+const BAR_PNL    = {{ portfolio.chart_bar_pnl    | tojson }};
+{% if history %}
+const HIST_DATES  = {{ history | map(attribute='date')        | list | tojson }};
+const HIST_VALUES = {{ history | map(attribute='total_value') | list | tojson }};
+{% endif %}
+
+const PALETTE = [
+  '#2563eb','#16a34a','#d97706','#dc2626','#7c3aed','#0891b2',
+  '#be185d','#65a30d','#ea580c','#0284c7','#4f46e5','#b45309'
+];
+
+// Pie chart
+new Chart(document.getElementById('pieChart'), {
+  type: 'doughnut',
+  data: {
+    labels: PIE_LABELS,
+    datasets: [{ data: PIE_VALUES, backgroundColor: PALETTE, borderWidth: 2, borderColor: '#fff' }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 12 } } } }
+  }
+});
+
+// Bar chart
+const barColors = BAR_PNL.map(v => v >= 0 ? 'rgba(22,163,74,.8)' : 'rgba(220,38,38,.8)');
+new Chart(document.getElementById('barChart'), {
+  type: 'bar',
+  data: {
+    labels: BAR_LABELS,
+    datasets: [{ label: 'P&L (Rs.)', data: BAR_PNL, backgroundColor: barColors, borderRadius: 4 }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 11 } } },
+      x: { grid: { display: false }, ticks: { font: { size: 11 } } }
+    }
+  }
+});
+
+{% if history %}
+// Line chart
+new Chart(document.getElementById('lineChart'), {
+  type: 'line',
+  data: {
+    labels: HIST_DATES,
+    datasets: [{
+      label: 'Portfolio Value',
+      data: HIST_VALUES,
+      borderColor: '#2563eb',
+      backgroundColor: 'rgba(37,99,235,.08)',
+      fill: true, tension: 0.3, pointRadius: 3
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 11 } } },
+      x: { grid: { display: false }, ticks: { font: { size: 11 }, maxTicksLimit: 10 } }
+    }
+  }
+});
+{% endif %}
+
+function dashboard() {
+  return {
+    refreshing: false,
+    async refreshPrices() {
+      this.refreshing = true;
+      try {
+        const r = await fetch('/api/refresh-prices', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) { showToast('Prices refreshed!', 'success'); setTimeout(() => location.reload(), 800); }
+        else showToast(d.error || 'Refresh failed', 'error');
+      } catch(e) { showToast('Network error', 'error'); }
+      finally { this.refreshing = false; }
+    }
+  }
+}
+</script>
+{% endblock %}

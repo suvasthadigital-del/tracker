@@ -1,0 +1,320 @@
+{% extends "base.html" %}
+{% block title %}Holdings — NEPSE Portfolio{% endblock %}
+
+{% block content %}
+<div class="page" x-data="holdings()" x-init="init()">
+
+  <div class="page-header flex items-center justify-between">
+    <div>
+      <h1>Holdings</h1>
+      <p>Add, edit, or delete your stock entries</p>
+    </div>
+    <button class="btn btn-primary" @click="openAdd()">+ Add Holding</button>
+  </div>
+
+  <!-- ── Filters ─────────────────────────────────────────────────────────── -->
+  <div class="card mb-6">
+    <div class="flex items-center gap-3" style="flex-wrap:wrap">
+      <div style="flex:1;min-width:180px">
+        <input type="text" placeholder="🔍  Search by symbol or company…" x-model="search" style="margin:0">
+      </div>
+      <div class="chips">
+        <span class="chip" :class="filterTag==='' && 'active'" @click="filterTag=''">All</span>
+        {% for tag in tags %}
+        <span class="chip" :class="filterTag==='{{ tag }}' && 'active'" @click="filterTag='{{ tag }}'">{{ tag }}</span>
+        {% endfor %}
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn btn-secondary btn-sm" @click="viewMode='detail'" :class="viewMode==='detail' && 'btn-primary'">Per Entry</button>
+        <button class="btn btn-secondary btn-sm" @click="viewMode='agg'"    :class="viewMode==='agg'    && 'btn-primary'">Aggregated</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Holdings table ──────────────────────────────────────────────────── -->
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr x-show="viewMode==='detail'">
+          <th>Symbol</th>
+          <th>Tag</th>
+          <th>Company</th>
+          <th class="text-right">Qty</th>
+          <th class="text-right">Buy Price</th>
+          <th class="text-right">LTP</th>
+          <th class="text-right">Invested</th>
+          <th class="text-right">Value</th>
+          <th class="text-right">P&L</th>
+          <th class="text-right">P&L %</th>
+          <th class="text-right">CAGR</th>
+          <th class="text-right">Days</th>
+          <th class="text-right">Buy Date</th>
+          <th class="text-center">Actions</th>
+        </tr>
+        <tr x-show="viewMode==='agg'">
+          <th>Symbol</th>
+          <th>Company</th>
+          <th class="text-right">Total Qty</th>
+          <th class="text-right">Avg Buy</th>
+          <th class="text-right">LTP</th>
+          <th class="text-right">Invested</th>
+          <th class="text-right">Value</th>
+          <th class="text-right">P&L</th>
+          <th class="text-right">P&L %</th>
+        </tr>
+      </thead>
+      <tbody x-show="viewMode==='detail'">
+        <template x-for="h in filteredDetail()" :key="h.id">
+          <tr>
+            <td><span class="symbol-pill" x-text="h.symbol"></span></td>
+            <td>
+              <span class="badge" :class="'badge-'+h.tag.toLowerCase()" x-text="h.tag"></span>
+            </td>
+            <td style="max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+                x-text="h.company_name || '—'"></td>
+            <td class="text-right mono" x-text="fmt0(h.quantity)"></td>
+            <td class="text-right mono" x-text="fmt2(h.buy_price)"></td>
+            <td class="text-right mono">
+              <span x-show="h.ltp" x-text="fmt2(h.ltp)"></span>
+              <span x-show="!h.ltp" style="color:var(--ink-4)">—</span>
+            </td>
+            <td class="text-right mono" x-text="fmt0(h.invested)"></td>
+            <td class="text-right mono">
+              <span x-show="h.ltp" x-text="fmt0(h.current_value)"></span>
+              <span x-show="!h.ltp" style="color:var(--ink-4)">—</span>
+            </td>
+            <td class="text-right mono" :class="h.pnl_amount >= 0 ? 'text-green' : 'text-red'">
+              <span x-show="h.ltp" x-text="(h.pnl_amount>=0?'+':'')+fmt0(h.pnl_amount)"></span>
+              <span x-show="!h.ltp" style="color:var(--ink-4)">—</span>
+            </td>
+            <td class="text-right">
+              <span x-show="h.ltp"
+                    class="badge"
+                    :style="h.pnl_percent>=0 ? 'background:var(--green-dim);color:var(--green)' : 'background:var(--red-dim);color:var(--red)'"
+                    x-text="(h.pnl_percent>=0?'+':'')+h.pnl_percent+'%'"></span>
+              <span x-show="!h.ltp" style="color:var(--ink-4)">—</span>
+            </td>
+            <td class="text-right" :class="(h.cagr||0) >= 0 ? 'text-green' : 'text-red'">
+              <span x-show="h.cagr !== null && h.cagr !== undefined" x-text="(h.cagr>=0?'+':'')+h.cagr+'%'"></span>
+              <span x-show="h.cagr === null || h.cagr === undefined" style="color:var(--ink-4)">—</span>
+            </td>
+            <td class="text-right mono" x-text="h.days_held"></td>
+            <td class="text-right mono" style="font-size:12px" x-text="h.buy_date"></td>
+            <td class="text-center">
+              <div class="flex items-center gap-2" style="justify-content:center">
+                <button class="btn-icon" @click="openEdit(h)" title="Edit">✏️</button>
+                <button class="btn-icon" @click="deleteHolding(h.id, h.symbol)" title="Delete">🗑️</button>
+              </div>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="filteredDetail().length === 0">
+          <td colspan="14" class="text-center" style="padding:40px;color:var(--ink-3)">
+            No holdings match your filter.
+          </td>
+        </tr>
+      </tbody>
+      <tbody x-show="viewMode==='agg'">
+        <template x-for="s in filteredAgg()" :key="s.symbol">
+          <tr>
+            <td><span class="symbol-pill" x-text="s.symbol"></span></td>
+            <td x-text="s.company_name || '—'"></td>
+            <td class="text-right mono" x-text="fmt0(s.qty)"></td>
+            <td class="text-right mono" x-text="fmt2(s.avg_buy_price)"></td>
+            <td class="text-right mono">
+              <span x-show="s.ltp" x-text="fmt2(s.ltp)"></span>
+              <span x-show="!s.ltp" style="color:var(--ink-4)">—</span>
+            </td>
+            <td class="text-right mono" x-text="fmt0(s.invested)"></td>
+            <td class="text-right mono" x-text="fmt0(s.current_value)"></td>
+            <td class="text-right mono" :class="s.pnl_amount >= 0 ? 'text-green' : 'text-red'"
+                x-text="(s.pnl_amount>=0?'+':'')+fmt0(s.pnl_amount)"></td>
+            <td class="text-right">
+              <span class="badge"
+                    :style="s.pnl_percent>=0 ? 'background:var(--green-dim);color:var(--green)' : 'background:var(--red-dim);color:var(--red)'"
+                    x-text="(s.pnl_percent>=0?'+':'')+s.pnl_percent+'%'"></span>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── Add / Edit Modal ────────────────────────────────────────────────── -->
+  <div class="modal-backdrop" x-show="showModal" x-transition @click.self="showModal=false" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 x-text="editId ? 'Edit Holding' : 'Add Holding'"></h2>
+        <button class="btn-icon" @click="showModal=false" style="font-size:18px">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Symbol *</label>
+            <input x-model="form.symbol" placeholder="e.g. NABIL" style="text-transform:uppercase">
+          </div>
+          <div class="form-group">
+            <label>Tag *</label>
+            <select x-model="form.tag">
+              {% for tag in tags %}
+              <option value="{{ tag }}">{{ tag }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Quantity *</label>
+            <input type="number" x-model="form.quantity" placeholder="100" min="0.001" step="any">
+          </div>
+          <div class="form-group">
+            <label>Buy Price (Rs.) *</label>
+            <input type="number" x-model="form.buy_price" placeholder="1200.00" min="0" step="0.01">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Buy Date *</label>
+            <input type="date" x-model="form.buy_date">
+          </div>
+          <div class="form-group">
+            <label>Company Name</label>
+            <input x-model="form.company_name" placeholder="Auto-filled on refresh">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Notes</label>
+          <input x-model="form.notes" placeholder="Optional note">
+        </div>
+
+        <!-- Summary preview -->
+        <div x-show="form.quantity && form.buy_price"
+             style="background:var(--surface-2);border-radius:8px;padding:12px;font-size:13px;margin-top:4px">
+          <strong>Invested:</strong>
+          Rs. <span x-text="fmt0(parseFloat(form.quantity||0) * parseFloat(form.buy_price||0))"></span>
+        </div>
+
+        <div class="divider"></div>
+        <div class="flex gap-2" style="justify-content:flex-end">
+          <button class="btn btn-secondary" @click="showModal=false">Cancel</button>
+          <button class="btn btn-primary" @click="saveHolding()" :disabled="saving">
+            <span x-show="saving" class="spinner"></span>
+            <span x-text="saving ? 'Saving…' : (editId ? 'Save Changes' : 'Add Holding')"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete confirm modal -->
+  <div class="modal-backdrop" x-show="showDelete" x-transition @click.self="showDelete=false" style="display:none">
+    <div class="modal" style="max-width:380px">
+      <div class="modal-header">
+        <h2>Delete Holding</h2>
+        <button class="btn-icon" @click="showDelete=false" style="font-size:18px">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="margin-bottom:20px">Are you sure you want to delete <strong x-text="deleteSymbol"></strong>? This cannot be undone.</p>
+        <div class="flex gap-2" style="justify-content:flex-end">
+          <button class="btn btn-secondary" @click="showDelete=false">Cancel</button>
+          <button class="btn btn-danger" @click="confirmDelete()">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const SERVER_HOLDINGS  = {{ holdings | tojson }};
+const SERVER_AGGREGATED = {{ portfolio.aggregated | tojson if portfolio is defined else '[]' }};
+
+function holdings() {
+  return {
+    all: SERVER_HOLDINGS,
+    agg: [],
+    search: '',
+    filterTag: '',
+    viewMode: 'detail',
+    showModal: false,
+    showDelete: false,
+    saving: false,
+    editId: null,
+    deleteId: null,
+    deleteSymbol: '',
+    form: { symbol:'', tag:'Buy', quantity:'', buy_price:'', buy_date:'', company_name:'', notes:'' },
+
+    init() {
+      // fetch aggregated from API for agg view
+      fetch('/api/portfolio').then(r=>r.json()).then(d => { this.agg = d.aggregated || []; });
+    },
+
+    fmt0(v) { return Number(v||0).toLocaleString('en-IN', {maximumFractionDigits:0}); },
+    fmt2(v) { return Number(v||0).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}); },
+
+    filteredDetail() {
+      return this.all.filter(h => {
+        const matchSearch = !this.search || h.symbol.includes(this.search.toUpperCase()) ||
+                            (h.company_name||'').toLowerCase().includes(this.search.toLowerCase());
+        const matchTag = !this.filterTag || h.tag === this.filterTag;
+        return matchSearch && matchTag;
+      });
+    },
+
+    filteredAgg() {
+      return this.agg.filter(s => {
+        return !this.search || s.symbol.includes(this.search.toUpperCase()) ||
+               (s.company_name||'').toLowerCase().includes(this.search.toLowerCase());
+      });
+    },
+
+    openAdd() {
+      this.editId = null;
+      this.form = { symbol:'', tag:'Buy', quantity:'', buy_price:'', buy_date: new Date().toISOString().split('T')[0], company_name:'', notes:'' };
+      this.showModal = true;
+    },
+
+    openEdit(h) {
+      this.editId = h.id;
+      this.form = { symbol: h.symbol, tag: h.tag, quantity: h.quantity, buy_price: h.buy_price,
+                    buy_date: h.buy_date, company_name: h.company_name||'', notes: h.notes||'' };
+      this.showModal = true;
+    },
+
+    async saveHolding() {
+      if (!this.form.symbol || !this.form.quantity || !this.form.buy_price || !this.form.buy_date) {
+        showToast('Please fill all required fields', 'error'); return;
+      }
+      this.saving = true;
+      try {
+        const url    = this.editId ? `/api/holdings/${this.editId}` : '/api/holdings';
+        const method = this.editId ? 'PUT' : 'POST';
+        const r      = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(this.form) });
+        const d      = await r.json();
+        if (r.ok) {
+          showToast(this.editId ? 'Holding updated!' : 'Holding added!', 'success');
+          this.showModal = false;
+          setTimeout(() => location.reload(), 600);
+        } else { showToast(d.error || 'Save failed', 'error'); }
+      } catch(e) { showToast('Network error', 'error'); }
+      finally { this.saving = false; }
+    },
+
+    deleteHolding(id, symbol) {
+      this.deleteId = id; this.deleteSymbol = symbol; this.showDelete = true;
+    },
+
+    async confirmDelete() {
+      try {
+        const r = await fetch(`/api/holdings/${this.deleteId}`, { method:'DELETE' });
+        if (r.ok) {
+          showToast('Holding deleted', 'success');
+          this.showDelete = false;
+          setTimeout(() => location.reload(), 600);
+        }
+      } catch(e) { showToast('Delete failed', 'error'); }
+    }
+  }
+}
+</script>
+{% endblock %}

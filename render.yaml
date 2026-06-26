@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: nepse-portfolio
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 1 --timeout 120 --bind 0.0.0.0:$PORT
+    envVars:
+      - key: DATA_DIR
+        value: /var/data
+      - key: SENDGRID_API_KEY
+        sync: false          # set manually in Render dashboard
+      - key: SENDGRID_FROM_EMAIL
+        sync: false          # set manually in Render dashboard
+    disk:
+      name: portfolio-data
+      mountPath: /var/data
+      sizeGB: 1
